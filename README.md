@@ -8,7 +8,6 @@ Discord 用のカラーロールパネルボット。`/panel` コマンドでパ
 npm install
 ```
 
-`.env` ではなく環境変数で設定します:
 
 | 変数 | 必須 | 説明 |
 | --- | --- | --- |
@@ -16,6 +15,14 @@ npm install
 | `CLIENT_ID` | ✅ | アプリケーション ID |
 | `GUILD_ID` | - | 指定するとギルド限定コマンドとして登録（即時反映） |
 | `DB_PATH` | - | パネル状態の保存先（デフォルト: `bot.db`） |
+
+## 必要な権限
+
+- Manage Roles
+- View Channels
+- Send Messages
+- Embed Links
+- Read Message History
 
 ## 開発
 
