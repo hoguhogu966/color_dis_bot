@@ -15,8 +15,11 @@ export const commands = [
         .addStringOption((o) =>
           o.setName("title").setDescription("Panel title").setRequired(true),
         )
-        .addRoleOption((o) =>
-          o.setName("role").setDescription("Initial role").setRequired(true),
+        .addStringOption((o) =>
+          o
+            .setName("roles")
+            .setDescription("Role mentions separated by spaces (e.g. @Red @Blue)")
+            .setRequired(true),
         ),
     )
     .addSubcommand((sub) =>
