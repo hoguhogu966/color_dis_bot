@@ -1,6 +1,7 @@
 import {
   ActionRowBuilder,
   EmbedBuilder,
+  PermissionFlagsBits,
   StringSelectMenuBuilder,
   type ChatInputCommandInteraction,
   type StringSelectMenuInteraction,
@@ -21,6 +22,31 @@ function buildComponents(roles: { label: string; roleId: string }[]) {
     .addOptions(roles.map((role) => ({ label: role.label, value: role.roleId })));
 
   return [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)];
+}
+
+const DANGEROUS_PERMISSIONS = [
+  PermissionFlagsBits.Administrator,
+  PermissionFlagsBits.ManageRoles,
+  PermissionFlagsBits.ManageGuild,
+  PermissionFlagsBits.ManageChannels,
+  PermissionFlagsBits.ManageWebhooks,
+  PermissionFlagsBits.ManageEvents,
+  PermissionFlagsBits.ManageThreads,
+  PermissionFlagsBits.ManageMessages,
+  PermissionFlagsBits.BanMembers,
+  PermissionFlagsBits.KickMembers,
+  PermissionFlagsBits.ModerateMembers,
+];
+
+function dangerousCheck(role: Role): string | null {
+  if (role.permissions.has(PermissionFlagsBits.Administrator)) {
+    return role.name + " has Administrator permission and cannot be added to a panel.";
+  }
+  const permission = DANGEROUS_PERMISSIONS.find((flag) => role.permissions.has(flag));
+  if (permission) {
+    return role.name + " has sensitive permissions and cannot be added to a panel.";
+  }
+  return null;
 }
 
 function assignableReason(role: Role): string | null {
@@ -81,7 +107,7 @@ async function createPanel(interaction: ChatInputCommandInteraction): Promise<vo
     return;
   }
 
-  const reason = assignableReason(role);
+  const reason = dangerousCheck(role) ?? assignableReason(role);
   if (reason) {
     await interaction.reply({ content: reason, ephemeral: true });
     return;
@@ -155,7 +181,7 @@ async function addRole(interaction: ChatInputCommandInteraction): Promise<void> 
     return;
   }
 
-  const reason = assignableReason(role);
+  const reason = dangerousCheck(role) ?? assignableReason(role);
   if (reason) {
     await interaction.reply({ content: reason, ephemeral: true });
     return;
@@ -225,7 +251,7 @@ export async function handleSelectMenu(
     return;
   }
 
-  const reason = assignableReason(role);
+  const reason = dangerousCheck(role) ?? assignableReason(role);
   if (reason) {
     await interaction.reply({ content: reason, ephemeral: true });
     return;
