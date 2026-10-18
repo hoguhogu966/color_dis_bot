@@ -4,6 +4,7 @@ import {
   PermissionFlagsBits,
   StringSelectMenuBuilder,
   type ChatInputCommandInteraction,
+  type Guild,
   type StringSelectMenuInteraction,
   type Role,
   type TextBasedChannel,
@@ -12,6 +13,7 @@ import {
 import { addPanelRole, deletePanel, getPanelRoles, setPanelRoles } from "./store.js";
 
 const CUSTOM_ID = "color-role";
+const MAX_SELECT_OPTIONS = 25;
 
 function buildComponents(roles: { label: string; roleId: string }[]) {
   const menu = new StringSelectMenuBuilder()
@@ -22,6 +24,28 @@ function buildComponents(roles: { label: string; roleId: string }[]) {
     .addOptions(roles.map((role) => ({ label: role.label, value: role.roleId })));
 
   return [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)];
+}
+
+function parseRoles(
+  input: string,
+  guild: Guild | null,
+): { label: string; roleId: string }[] {
+  const roleIds = [
+    ...new Set(
+      [...input.matchAll(/<@&(\d+)>/g)]
+        .map((match) => match[1])
+        .filter((id): id is string => id !== undefined),
+    ),
+  ];
+
+  if (!guild) {
+    return [];
+  }
+
+  return roleIds.flatMap((roleId) => {
+    const role = guild.roles.cache.get(roleId);
+    return role ? [{ label: role.name, roleId: role.id }] : [];
+  });
 }
 
 const DANGEROUS_PERMISSIONS = [
@@ -63,6 +87,38 @@ function assignableReason(role: Role): string | null {
   return null;
 }
 
+async function validatePanelRoles(
+  interaction: ChatInputCommandInteraction,
+  panelRoles: { label: string; roleId: string }[],
+): Promise<boolean> {
+  const guild = interaction.guild;
+  if (!guild) {
+    await interaction.reply({
+      content: "A role could not be found in this server.",
+      ephemeral: true,
+    });
+    return false;
+  }
+
+  for (const panelRole of panelRoles) {
+    const role = await guild.roles.fetch(panelRole.roleId).catch(() => null);
+    if (!role) {
+      await interaction.reply({
+        content: "A role could not be found in this server.",
+        ephemeral: true,
+      });
+      return false;
+    }
+    const reason = dangerousCheck(role) ?? assignableReason(role);
+    if (reason) {
+      await interaction.reply({ content: reason, ephemeral: true });
+      return false;
+    }
+  }
+
+  return true;
+}
+
 export async function handleCommand(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
@@ -94,22 +150,18 @@ export async function handleCommand(
 async function createPanel(interaction: ChatInputCommandInteraction): Promise<void> {
   const channelOption = interaction.options.getChannel("channel", true);
   const title = interaction.options.getString("title", true);
-  const roleOption = interaction.options.getRole("role", true);
-  const role = interaction.guild
-    ? await interaction.guild.roles.fetch(roleOption.id).catch(() => null)
-    : null;
+  const rolesInput = interaction.options.getString("roles", true);
 
-  if (!role) {
+  const roles = parseRoles(rolesInput, interaction.guild).slice(0, MAX_SELECT_OPTIONS);
+  if (roles.length === 0) {
     await interaction.reply({
-      content: "The role could not be found in this server.",
+      content: "At least one valid role mention is required.",
       ephemeral: true,
     });
     return;
   }
 
-  const reason = dangerousCheck(role) ?? assignableReason(role);
-  if (reason) {
-    await interaction.reply({ content: reason, ephemeral: true });
+  if (!(await validatePanelRoles(interaction, roles))) {
     return;
   }
 
@@ -123,73 +175,83 @@ async function createPanel(interaction: ChatInputCommandInteraction): Promise<vo
   }
 
   const embed = new EmbedBuilder().setTitle(title).setDescription("Pick a role below.");
-  const message = await (channel as TextChannel).send({
-    embeds: [embed],
-    components: buildComponents([{ label: role.name, roleId: role.id }]),
-  }).catch(async (error) => {
-    console.error("Failed to send panel message:", error);
-    await interaction.reply({
-      content: "Failed to send the panel message. Check the bot's permissions in that channel.",
-      ephemeral: true,
+  const message = await (channel as TextChannel)
+    .send({
+      embeds: [embed],
+      components: buildComponents(roles),
+    })
+    .catch(async (error) => {
+      console.error("Failed to send panel message:", error);
+      await interaction.reply({
+        content:
+          "Failed to send the panel message. Check the bot's permissions in that channel.",
+        ephemeral: true,
+      });
+      return null;
     });
-    return null;
-  });
 
   if (!message) {
     return;
   }
 
-  setPanelRoles(message.id, [{ label: role.name, roleId: role.id }]);
+  setPanelRoles(message.id, roles);
   await interaction.reply({ content: `Panel created: ${message.id}`, ephemeral: true });
 }
 
 async function addRole(interaction: ChatInputCommandInteraction): Promise<void> {
   const messageId = interaction.options.getString("message_id", true);
-  const roleOption = interaction.options.getRole("role", true);
-  const role = interaction.guild
-    ? await interaction.guild.roles.fetch(roleOption.id).catch(() => null)
-    : null;
-  if (!role) {
+  const rolesInput = interaction.options.getString("roles", true);
+  const label = interaction.options.getString("label");
+
+  const roles = parseRoles(rolesInput, interaction.guild);
+  if (roles.length === 0) {
     await interaction.reply({
-      content: "The role could not be found in this server.",
+      content: "At least one valid role mention is required.",
       ephemeral: true,
     });
     return;
   }
-  const label = interaction.options.getString("label", true);
 
-  const roles = getPanelRoles(messageId);
-  if (roles.length === 0) {
+  const first = roles[0];
+  if (label && roles.length === 1 && first) {
+    first.label = label;
+  }
+
+  const existing = getPanelRoles(messageId);
+  if (existing.length === 0) {
     await interaction.reply({
       content: `No panel found for message ${messageId}.`,
       ephemeral: true,
     });
     return;
   }
-  if (roles.some((panelRole) => panelRole.roleId === role.id)) {
+  if (existing.length + roles.length > MAX_SELECT_OPTIONS) {
     await interaction.reply({
-      content: `${role.name} is already on this panel.`,
+      content: `Panel can hold at most ${MAX_SELECT_OPTIONS} roles.`,
       ephemeral: true,
     });
     return;
   }
-  if (roles.length >= 25) {
+  const duplicate = existing.find((panelRole) =>
+    roles.some((role) => role.roleId === panelRole.roleId),
+  );
+  if (duplicate) {
     await interaction.reply({
-      content: "A panel supports at most 25 roles.",
+      content: `${duplicate.label} is already on this panel.`,
       ephemeral: true,
     });
     return;
   }
 
-  const reason = dangerousCheck(role) ?? assignableReason(role);
-  if (reason) {
-    await interaction.reply({ content: reason, ephemeral: true });
+  if (!(await validatePanelRoles(interaction, roles))) {
     return;
   }
 
-  addPanelRole(messageId, { label, roleId: role.id });
+  for (const panelRole of roles) {
+    addPanelRole(messageId, panelRole);
+  }
   await refreshPanel(interaction.channel, messageId);
-  await interaction.reply({ content: `Role added to ${messageId}`, ephemeral: true });
+  await interaction.reply({ content: `Roles added to ${messageId}`, ephemeral: true });
 }
 
 async function removePanel(interaction: ChatInputCommandInteraction): Promise<void> {
