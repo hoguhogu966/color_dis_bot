@@ -25,15 +25,20 @@ export const commands = [
     .addSubcommand((sub) =>
       sub
         .setName("add-role")
-        .setDescription("Add a role option to an existing panel")
+        .setDescription("Add role options to an existing panel")
         .addStringOption((o) =>
           o.setName("message_id").setDescription("Panel message id").setRequired(true),
         )
-        .addRoleOption((o) =>
-          o.setName("role").setDescription("Role to add").setRequired(true),
+        .addStringOption((o) =>
+          o
+            .setName("roles")
+            .setDescription("Role mentions separated by spaces (e.g. @Red @Blue)")
+            .setRequired(true),
         )
         .addStringOption((o) =>
-          o.setName("label").setDescription("Display label").setRequired(true),
+          o
+            .setName("label")
+            .setDescription("Display label (applies when a single role is given)"),
         ),
     )
     .addSubcommand((sub) =>

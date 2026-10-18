@@ -3,6 +3,7 @@ import {
   EmbedBuilder,
   StringSelectMenuBuilder,
   type ChatInputCommandInteraction,
+  type Guild,
   type StringSelectMenuInteraction,
   type TextBasedChannel,
   type TextChannel,
@@ -21,6 +22,28 @@ function buildComponents(roles: { label: string; roleId: string }[]) {
     .addOptions(roles.map((role) => ({ label: role.label, value: role.roleId })));
 
   return [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)];
+}
+
+function parseRoles(
+  input: string,
+  guild: Guild | null,
+): { label: string; roleId: string }[] {
+  const roleIds = [
+    ...new Set(
+      [...input.matchAll(/<@&(\d+)>/g)]
+        .map((match) => match[1])
+        .filter((id): id is string => id !== undefined),
+    ),
+  ];
+
+  if (!guild) {
+    return [];
+  }
+
+  return roleIds.flatMap((roleId) => {
+    const role = guild.roles.cache.get(roleId);
+    return role ? [{ label: role.name, roleId: role.id }] : [];
+  });
 }
 
 export async function handleCommand(
@@ -48,23 +71,7 @@ async function createPanel(interaction: ChatInputCommandInteraction): Promise<vo
   const title = interaction.options.getString("title", true);
   const rolesInput = interaction.options.getString("roles", true);
 
-  const guild = interaction.guild;
-  const roleIds = [
-    ...new Set(
-      [...rolesInput.matchAll(/<@&(\d+)>/g)]
-        .map((match) => match[1])
-        .filter((id): id is string => id !== undefined),
-    ),
-  ];
-  const roles = guild
-    ? roleIds
-        .flatMap((roleId) => {
-          const role = guild.roles.cache.get(roleId);
-          return role ? [{ label: role.name, roleId: role.id }] : [];
-        })
-        .slice(0, MAX_SELECT_OPTIONS)
-    : [];
-
+  const roles = parseRoles(rolesInput, interaction.guild).slice(0, MAX_SELECT_OPTIONS);
   if (roles.length === 0) {
     await interaction.reply({
       content: "At least one valid role mention is required.",
@@ -94,12 +101,37 @@ async function createPanel(interaction: ChatInputCommandInteraction): Promise<vo
 
 async function addRole(interaction: ChatInputCommandInteraction): Promise<void> {
   const messageId = interaction.options.getString("message_id", true);
-  const role = interaction.options.getRole("role", true);
-  const label = interaction.options.getString("label", true);
+  const rolesInput = interaction.options.getString("roles", true);
+  const label = interaction.options.getString("label");
 
-  addPanelRole(messageId, { label, roleId: role.id });
+  const roles = parseRoles(rolesInput, interaction.guild);
+  if (roles.length === 0) {
+    await interaction.reply({
+      content: "At least one valid role mention is required.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const first = roles[0];
+  if (label && roles.length === 1 && first) {
+    first.label = label;
+  }
+
+  const existing = getPanelRoles(messageId);
+  if (existing.length + roles.length > MAX_SELECT_OPTIONS) {
+    await interaction.reply({
+      content: `Panel can hold at most ${MAX_SELECT_OPTIONS} roles.`,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  for (const role of roles) {
+    addPanelRole(messageId, role);
+  }
   await refreshPanel(interaction.channel, messageId);
-  await interaction.reply({ content: `Role added to ${messageId}`, ephemeral: true });
+  await interaction.reply({ content: `Roles added to ${messageId}`, ephemeral: true });
 }
 
 async function removePanel(interaction: ChatInputCommandInteraction): Promise<void> {
